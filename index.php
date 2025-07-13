@@ -1,14 +1,21 @@
 <?php
-require_once 'includes/app.php';
+// Define security constant
+define('VOTING_SYSTEM_SECURITY', true);
 
-// Redirect to appropriate dashboard based on user role
+// Include security functions
+require_once 'includes/security.php';
+
+// Initialize secure session
+Security::setSecurityHeaders();
+Security::initSecureSession();
+
+// Check if user is already logged in
 if (Security::isLoggedIn()) {
-    if (Security::isAdmin()) {
-        redirect('admin/dashboard.php');
-    } else {
-        redirect('dashboard.php');
-    }
-} else {
-    redirect('login.php');
+    header('Location: voting_system.php');
+    exit();
 }
+
+// Redirect to login page
+header('Location: simple_login.php');
+exit();
 ?>

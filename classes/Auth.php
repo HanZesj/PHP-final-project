@@ -8,8 +8,8 @@ class Auth {
     
     private $db;
     
-    public function __construct() {
-        $this->db = getDB();
+    public function __construct($connection = null) {
+        $this->db = $connection ?: getDB();
     }
     
     /**
@@ -203,6 +203,52 @@ class Auth {
                 'success' => false,
                 'message' => $e->getMessage()
             ];
+        }
+    }
+    
+    /**
+     * Get user by ID
+     */
+    public function getUserById($userId) {
+        try {
+            $stmt = $this->db->prepare("SELECT id, username, email, role, full_name, has_voted, status FROM users WHERE id = ? AND status = 'active'");
+            $stmt->execute([$userId]);
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log("Error getting user by ID: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Log user activity
+     */
+    public function logActivity($userId, $action, $description, $ipAddress = null) {
+        try {
+            $ipAddress = $ipAddress ?: $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+            
+            $stmt = $this->db->prepare("INSERT INTO activity_logs (user_id, action, description, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute([$userId, $action, $description, $ipAddress, $userAgent]);
+            return true;
+        } catch (Exception $e) {
+            error_log("Error logging activity: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Update session expiry
+     */
+    public function updateSessionExpiry($sessionId) {
+        try {
+            $newExpiry = date('Y-m-d H:i:s', time() + 3600); // Extend by 1 hour
+            $stmt = $this->db->prepare("UPDATE user_sessions SET expires_at = ? WHERE session_id = ?");
+            $stmt->execute([$newExpiry, $sessionId]);
+            return true;
+        } catch (Exception $e) {
+            error_log("Error updating session expiry: " . $e->getMessage());
+            return false;
         }
     }
 }

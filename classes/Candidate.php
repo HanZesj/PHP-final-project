@@ -8,8 +8,8 @@ class Candidate {
     
     private $db;
     
-    public function __construct() {
-        $this->db = getDB();
+    public function __construct($connection = null) {
+        $this->db = $connection ?: getDB();
     }
     
     /**
@@ -225,6 +225,47 @@ class Candidate {
             
         } catch (Exception $e) {
             error_log("Error getting candidate stats: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Check if candidate belongs to election
+     */
+    public function belongsToElection($candidateId, $electionId) {
+        try {
+            $stmt = $this->db->prepare("SELECT id FROM candidates WHERE id = ? AND election_id = ?");
+            $stmt->execute([$candidateId, $electionId]);
+            return $stmt->fetch() !== false;
+        } catch (Exception $e) {
+            error_log("Error checking candidate election: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Get election results
+     */
+    public function getElectionResults($electionId) {
+        try {
+            $stmt = $this->db->prepare("
+                SELECT 
+                    c.id,
+                    c.name,
+                    c.party,
+                    c.description,
+                    c.vote_count,
+                    COUNT(v.id) as actual_votes
+                FROM candidates c
+                LEFT JOIN votes v ON c.id = v.candidate_id
+                WHERE c.election_id = ?
+                GROUP BY c.id
+                ORDER BY c.vote_count DESC, c.name ASC
+            ");
+            $stmt->execute([$electionId]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            error_log("Error getting election results: " . $e->getMessage());
             return [];
         }
     }

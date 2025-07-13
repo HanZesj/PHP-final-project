@@ -8,101 +8,86 @@ class Vote {
     
     private $db;
     
-    public function __construct() {
-        $this->db = getDB();
+    public function __construct($connection = null) {
+        $this->db = $connection ?: getDB();
     }
     
     /**
-     * Cast a vote
+     * Cast a vote - updated for voting_system.php compatibility
      */
-    public function castVote($electionId, $candidateId) {
+    public function castVote($userId, $electionId, $candidateId) {
         try {
-            if (!Security::isLoggedIn()) {
-                throw new Exception("You must be logged in to vote.");
-            }
-            
-            $userId = $_SESSION['user_id'];
-            
-            // Validate election
-            $stmt = $this->db->prepare("SELECT * FROM elections WHERE id = ? AND start_date <= NOW() AND end_date > NOW()");
+            // Validate election is active
+            $stmt = $this->db->prepare("SELECT * FROM elections WHERE id = ? AND start_date <= NOW() AND end_date > NOW() AND status = 'active'");
             $stmt->execute([$electionId]);
             $election = $stmt->fetch();
             
             if (!$election) {
-                throw new Exception("Election not found or not currently active.");
+                return false;
             }
             
-            // Validate candidate
+            // Validate candidate belongs to election
             $stmt = $this->db->prepare("SELECT * FROM candidates WHERE id = ? AND election_id = ?");
             $stmt->execute([$candidateId, $electionId]);
             $candidate = $stmt->fetch();
             
             if (!$candidate) {
-                throw new Exception("Candidate not found in this election.");
+                return false;
             }
             
-            // Generate anonymized voter hash
-            $voterHash = Security::generateVoterHash($userId, $electionId);
-            
             // Check if user has already voted
-            $stmt = $this->db->prepare("SELECT id FROM votes WHERE election_id = ? AND voter_hash = ?");
-            $stmt->execute([$electionId, $voterHash]);
-            if ($stmt->fetch()) {
-                throw new Exception("You have already voted in this election.");
+            if ($this->hasUserVoted($userId, $electionId)) {
+                return false;
             }
             
             // Begin transaction
             $this->db->beginTransaction();
             
             try {
+                // Generate vote hash for anonymity
+                $voteHash = hash('sha256', $userId . $electionId . time() . random_bytes(16));
+                
                 // Cast vote
-                $stmt = $this->db->prepare("INSERT INTO votes (election_id, candidate_id, voter_hash, ip_address) VALUES (?, ?, ?, ?)");
-                $stmt->execute([$electionId, $candidateId, $voterHash, Security::getClientIP()]);
+                $stmt = $this->db->prepare("INSERT INTO votes (election_id, candidate_id, user_id, vote_hash) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$electionId, $candidateId, $userId, $voteHash]);
                 
                 // Update candidate vote count
                 $stmt = $this->db->prepare("UPDATE candidates SET vote_count = vote_count + 1 WHERE id = ?");
                 $stmt->execute([$candidateId]);
                 
-                // Mark user as voted (for UI purposes)
+                // Mark user as voted for this election
                 $stmt = $this->db->prepare("UPDATE users SET has_voted = TRUE WHERE id = ?");
                 $stmt->execute([$userId]);
                 
                 $this->db->commit();
-                
-                Security::logEvent('VOTE_CAST', "Vote cast in election {$electionId} for candidate {$candidateId}", $userId);
-                
-                return [
-                    'success' => true,
-                    'message' => 'Your vote has been cast successfully!'
-                ];
+                return true;
                 
             } catch (Exception $e) {
                 $this->db->rollback();
-                throw $e;
+                error_log("Error casting vote: " . $e->getMessage());
+                return false;
             }
             
         } catch (Exception $e) {
-            return [
-                'success' => false,
-                'message' => $e->getMessage()
-            ];
+            error_log("Error in castVote: " . $e->getMessage());
+            return false;
         }
     }
     
     /**
      * Check if user has voted in an election
      */
-    public function hasUserVoted($userId, $electionId) {
-        try {
-            $voterHash = Security::generateVoterHash($userId, $electionId);
-            $stmt = $this->db->prepare("SELECT id FROM votes WHERE election_id = ? AND voter_hash = ?");
-            $stmt->execute([$electionId, $voterHash]);
-            return $stmt->fetch() !== false;
-        } catch (Exception $e) {
-            error_log("Error checking vote status: " . $e->getMessage());
-            return false;
-        }
+public function hasUserVoted($userId, $electionId) {
+    try {
+        // Use same field name as castVote method
+        $stmt = $this->db->prepare("SELECT id FROM votes WHERE election_id = ? AND user_id = ?");
+        $stmt->execute([$electionId, $userId]);
+        return $stmt->fetch() !== false;
+    } catch (Exception $e) {
+        error_log("Error checking vote status: " . $e->getMessage());
+        return false;
     }
+}
     
     /**
      * Get vote statistics for an election
@@ -132,7 +117,7 @@ class Vote {
             // Votes over time (hourly breakdown)
             $stmt = $this->db->prepare("
                 SELECT DATE_FORMAT(vote_timestamp, '%Y-%m-%d %H:00:00') as hour,
-                       COUNT(*) as vote_count
+                    COUNT(*) as vote_count
                 FROM votes 
                 WHERE election_id = ?
                 GROUP BY hour
@@ -266,4 +251,5 @@ class Vote {
         }
     }
 }
+
 ?>
