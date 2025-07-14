@@ -9,6 +9,9 @@ if (!defined('VOTING_SYSTEM_SECURITY')) {
     define('VOTING_SYSTEM_SECURITY', true);
 }
 
+// Include database configuration
+require_once __DIR__ . '/../config/database.php';
+
 class Security {
     
     /**
